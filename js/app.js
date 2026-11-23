@@ -17,7 +17,8 @@
     keepOrder: $('keepOrder'), shuffleBtn: $('shuffleBtn'), quality: $('quality'),
     qualityOut: $('qualityOut'), maxSize: $('maxSize'), exportBtn: $('exportBtn'),
     result: $('result'), frame: $('frame'), preview: $('preview'), empty: $('empty'),
-    busy: $('busy'), busyText: $('busyText'), meta: $('meta'), webpBtn: $('webpBtn'),
+    progress: $('progress'), progressFill: $('progressFill'), progressText: $('progressText'),
+    exportLabel: $('exportLabel'), exportFill: $('exportFill'), meta: $('meta'), webpBtn: $('webpBtn'),
   };
 
   const state = {
@@ -162,15 +163,19 @@
     setStatus(`Chargement de ${fresh.length} photo${fresh.length > 1 ? 's' : ''}…`);
 
     const failed = [];
-    let i = 0;
+    let i = 0, loaded = 0;
+    const label = `Import ${fresh.length} photo${fresh.length > 1 ? 's' : ''}`;
+    setProgress('import', 0, label);
     const worker = async () => {
       while (i < fresh.length) {
         const p = fresh[i++];
         try { await preparePhoto(p); } catch (e) { failed.push(p); }
         updateThumb(p);
+        setProgress('import', ++loaded / fresh.length, label);
       }
     };
     await Promise.all([worker(), worker(), worker(), worker()]);
+    endProgress('import');
 
     if (failed.length) {
       const ids = new Set(failed.map((p) => p.id));
@@ -255,11 +260,13 @@
     }));
     state.photos.push(...photos);
     renderThumbs();
-    let i = 0;
+    let i = 0, loaded = 0;
     const bad = [];
+    setProgress('import', 0, 'Restauration');
     const worker = async () => {
       while (i < photos.length) {
         const p = photos[i++];
+        setProgress('import', loaded++ / photos.length, 'Restauration');
         try {
           const { img, release } = await loadImage(p.master);
           makeThumbs(p, img, img.naturalWidth, img.naturalHeight);
@@ -270,6 +277,7 @@
       }
     };
     await Promise.all([worker(), worker(), worker(), worker()]);
+    endProgress('import');
     for (const p of bad) removePhoto(p.id);
     setStatus(null);
     scheduleLayout();
@@ -327,7 +335,7 @@
     clearTimeout(storageTimer);
     storageTimer = setTimeout(() => {
       const bytes = state.photos.reduce((s, p) => s + (p.master ? p.master.size : 0), 0);
-      els.clearLabel.textContent = 'Effacer toutes les photos' + (bytes ? ` (${fmtBytes(bytes)})` : '');
+      els.clearLabel.textContent = 'Effacer les photos' + (bytes ? ` (${fmtBytes(bytes)})` : '');
     }, 300);
   }
 
@@ -423,10 +431,30 @@
   let workerOk = typeof Worker !== 'undefined' && location.protocol !== 'file:';
   let jobId = 0;
 
+  /* Progression du calcul : estimée à partir du temps prévu par le worker
+     (le calcul a un budget de temps connu). */
+  const layoutProg = { timer: 0, start: 0, expected: 0 };
+  function startLayoutProgress(n) {
+    clearInterval(layoutProg.timer);
+    layoutProg.start = performance.now();
+    layoutProg.expected = 0; // inconnu tant que la 1re composition n'est pas arrivée
+    const label = state.layout ? 'Optimisation' : 'Composition';
+    const tick = () => {
+      const t = performance.now() - layoutProg.start;
+      const f = layoutProg.expected ? 0.15 + 0.83 * Math.min(1, t / layoutProg.expected) : Math.min(0.15, t / 2000);
+      setProgress('layout', f, state.layout ? 'Optimisation' : label);
+    };
+    tick();
+    layoutProg.timer = setInterval(tick, 120);
+  }
+  function stopLayoutProgress() {
+    clearInterval(layoutProg.timer);
+    endProgress('layout');
+  }
+
   function applyLayout(res, photos, W, H, final) {
     state.layout = { ...res, photos, W, H };
-    if (!state.exporting) hideBusy();
-    els.frame.classList.toggle('refining', !final);
+    if (final) stopLayoutProgress();
     drawPreview();
   }
 
@@ -437,7 +465,7 @@
     if (!photos.length) {
       if (workerBusy && worker) { worker.terminate(); worker = null; workerBusy = false; }
       state.layout = null;
-      els.frame.classList.remove('refining');
+      stopLayoutProgress();
       drawPreview();
       return;
     }
@@ -450,8 +478,7 @@
     };
     // Première composition : gros indicateur. Ensuite : on garde l'aperçu
     // actuel avec un petit badge pendant le calcul.
-    if (!state.layout) showBusy('Composition…');
-    els.frame.classList.add('refining');
+    startLayoutProgress(photos.length);
 
     if (workerOk) {
       try {
@@ -468,6 +495,7 @@
         worker.onmessage = (e) => {
           if (e.data.id !== jobId) return;
           if (e.data.final) workerBusy = false;
+          else layoutProg.expected = e.data.expectedMs;
           applyLayout(e.data.res, photos, W, H, e.data.final);
         };
         workerBusy = true;
@@ -480,7 +508,9 @@
     // Repli : calcul direct, rapide puis affiné.
     setTimeout(() => {
       if (job !== jobId) return;
+      const t0 = performance.now();
       const quick = MosaicLayout.computeLayout(ars, { ...opts, timeBudget: 60 });
+      layoutProg.expected = (performance.now() - t0) * 3 + 750;
       applyLayout(quick, photos, W, H, false);
       setTimeout(() => {
         if (job !== jobId) return;
@@ -560,7 +590,7 @@
       let fallbacks = 0;
       // Les originaux sont décodés un par un puis libérés : mémoire maîtrisée.
       for (const c of L.cells) {
-        showBusy(`Rendu ${++done} / ${L.cells.length}…`);
+        setExportProgress(0.9 * done++ / L.cells.length, `Rendu ${done} / ${L.cells.length} ·`);
         const p = L.photos[c.index];
         const x0 = Math.round(c.x * k), y0 = Math.round(c.y * k);
         const x1 = Math.round((c.x + c.w) * k), y1 = Math.round((c.y + c.h) * k);
@@ -589,7 +619,8 @@
         if (done % 4 === 0) await new Promise((r) => setTimeout(r, 0));
       }
 
-      showBusy('Compression…');
+      setExportProgress(0.9, 'Compression');
+      await new Promise((r) => setTimeout(r, 0));
       const type = state.s.format;
       const limit = state.s.maxSize * 1024 * 1024;
       let q = state.s.quality / 100;
@@ -600,6 +631,7 @@
         let lo = 0.4, hi = q, best = null;
         for (let i = 0; i < 7; i++) {
           const mid = (lo + hi) / 2;
+          setExportProgress(0.9 + 0.1 * (i + 1) / 8, 'Ajustement du poids');
           const b = await toBlob(cv, type, mid);
           if (b.size <= limit) { best = { b, q: mid }; lo = mid; } else hi = mid;
         }
@@ -626,7 +658,9 @@
       els.result.hidden = false;
     } finally {
       state.exporting = false;
-      hideBusy();
+      endProgress('export');
+      els.exportFill.style.width = '0';
+      els.exportLabel.textContent = 'Télécharger la mosaïque';
       updateButtons();
     }
   }
@@ -637,11 +671,38 @@
     const n = state.photos.length;
     els.status.textContent = msg || (n ? `${n} photo${n > 1 ? 's' : ''} · gardées sur cet appareil` : 'Ajoutez des photos pour commencer');
   }
-  function showBusy(t) { els.busyText.textContent = t; els.busy.hidden = false; }
-  function hideBusy() { els.busy.hidden = true; }
+  /* Barre de progression unique en haut de l'aperçu. Plusieurs tâches peuvent
+     tourner en même temps : on affiche la plus importante. */
+  const PRIORITY = ['export', 'import', 'layout'];
+  const tasks = {};
+  function setProgress(kind, frac, text) {
+    tasks[kind] = { frac: Math.max(0, Math.min(1, frac)), text };
+    renderProgress();
+  }
+  function endProgress(kind) {
+    delete tasks[kind];
+    renderProgress();
+  }
+  function renderProgress() {
+    const kind = PRIORITY.find((k) => tasks[k]);
+    if (!kind) { els.progress.hidden = true; els.progressFill.style.width = '0'; return; }
+    const t = tasks[kind];
+    const pct = Math.round(t.frac * 100);
+    els.progress.hidden = false;
+    els.progressFill.style.width = pct + '%';
+    els.progressText.textContent = `${t.text} ${pct} %`;
+    els.progress.setAttribute('aria-valuenow', pct);
+    els.progress.setAttribute('aria-valuetext', els.progressText.textContent);
+  }
+  function setExportProgress(frac, text) {
+    setProgress('export', frac, text);
+    els.exportFill.style.width = Math.round(frac * 100) + '%';
+    els.exportLabel.textContent = `${text} ${Math.round(frac * 100)} %`;
+  }
   function updateButtons() {
     const has = readyPhotos().length > 0;
     els.exportBtn.disabled = !has || state.exporting;
+    els.exportBtn.classList.toggle('working', state.exporting);
     els.shuffleBtn.disabled = !has || state.exporting || state.s.keepOrder && readyPhotos().length > 16;
   }
 

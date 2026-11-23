@@ -31,7 +31,7 @@
         <div class="thumbs" id="thumbs"></div>
         <button class="btn danger" id="clearBtn" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>
-          <span id="clearLabel">Effacer toutes les photos</span>
+          <span id="clearLabel">Effacer les photos</span>
         </button>
       </section>
 
@@ -95,7 +95,8 @@
         </div>
         <button class="btn primary" id="exportBtn" disabled>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>
-          Télécharger la mosaïque
+          <span id="exportLabel">Télécharger la mosaïque</span>
+          <i class="btn-fill" id="exportFill"></i>
         </button>
         <p class="result" id="result" hidden></p>
       </section>
@@ -108,7 +109,10 @@
           <p>Votre mur de photos apparaîtra ici.</p>
           <p class="muted">La composition s'adapte automatiquement aux photos en portrait et en paysage.</p>
         </div>
-        <div class="busy" id="busy" hidden><div class="spinner"></div><span id="busyText">Composition…</span></div>
+        <div class="progress" id="progress" hidden role="progressbar" aria-valuemin="0" aria-valuemax="100">
+          <div class="track"><i id="progressFill"></i></div>
+          <span class="pill" id="progressText"></span>
+        </div>
       </div>
       <div class="meta" id="meta"></div>
     </section>

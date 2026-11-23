@@ -127,6 +127,7 @@ select { background: var(--panel-2); color: var(--text); border: 1px solid var(-
 .btn.primary:hover:not(:disabled) { background: var(--accent-2); }
 .btn.ghost:hover:not(:disabled) { border-color: var(--accent); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.working:disabled { opacity: 1; cursor: progress; }
 
 .result { margin: 0; font-size: 13px; color: var(--muted); background: var(--panel-2); border-radius: 8px; padding: 8px 10px; }
 .result b { color: var(--text); }
@@ -149,14 +150,19 @@ select { background: var(--panel-2); color: var(--text); border: 1px solid var(-
 .empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; color: var(--text); }
 .empty p { margin: 2px 0; }
 .muted { color: var(--muted); font-size: 13px; }
-.busy { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(15,17,21,.55); border-radius: 4px; font-weight: 600; }
-.frame::after {
-  content: 'Optimisation…'; position: absolute; top: 8px; right: 8px;
-  font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
-  background: rgba(15, 17, 21, .75); color: #fff; opacity: 0; transition: opacity .2s; pointer-events: none;
+.progress { position: absolute; inset: 0 0 auto 0; pointer-events: none; z-index: 2; }
+.progress .track { height: 4px; background: rgba(255, 255, 255, .12); border-radius: 4px 4px 0 0; overflow: hidden; }
+.progress .track i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s ease-out; }
+.progress .pill {
+  position: absolute; top: 10px; right: 10px; display: flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+  background: rgba(15, 17, 21, .8); color: #fff; font-variant-numeric: tabular-nums;
 }
-.frame.refining::after { opacity: 1; }
-.spinner { width: 20px; height: 20px; border: 2.5px solid rgba(255,255,255,.25); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
+.progress .pill::before { content: ''; width: 10px; height: 10px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
+.btn { position: relative; overflow: hidden; }
+.btn > * { position: relative; z-index: 1; }
+.btn > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn-fill { position: absolute !important; z-index: 0 !important; inset: 0 auto 0 0; width: 0; background: rgba(255, 255, 255, .22); transition: width .25s ease-out; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .meta { color: var(--muted); font-size: 12.5px; min-height: 18px; text-align: center; }
 
