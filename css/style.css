@@ -105,6 +105,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .seg button:disabled { opacity: .35; cursor: not-allowed; }
 .ico { display: block; border: 2px solid currentColor; border-radius: 3px; margin-bottom: 3px; }
 .ico-land { width: 22px; height: 13px; }
+.ico-45 { width: 13px; height: 16px; margin-bottom: 0; }
 .ico-sq { width: 15px; height: 15px; margin-bottom: 1px; }
 .ico-port { width: 13px; height: 22px; margin-bottom: -6px; transform: translateY(-4px); }
 
@@ -143,6 +144,7 @@ select { background: var(--panel-2); color: var(--text); border: 1px solid var(-
 }
 .frame.portrait { aspect-ratio: 9 / 16; width: auto; height: 100%; }
 .frame.square { aspect-ratio: 1; width: auto; height: 100%; }
+.frame.insta { aspect-ratio: 4 / 5; width: auto; height: 100%; }
 .frame canvas { width: 100%; height: 100%; display: block; border-radius: 4px; }
 .empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; color: var(--text); }
 .empty p { margin: 2px 0; }
