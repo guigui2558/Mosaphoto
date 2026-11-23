@@ -111,7 +111,7 @@
   }
 
   /* Dessine une photo dans une cellule en "cover", centrée sur son point d'intérêt. */
-  function drawCell(ctx, src, srcW, srcH, focus, x, y, w, h, radius) {
+  function drawCell(ctx, src, srcW, srcH, focus, x, y, w, h, radius, fast) {
     const target = w / h;
     let sw = srcW, sh = srcH;
     if (srcW / srcH > target) sw = srcH * target; else sh = srcW / target;
@@ -128,7 +128,14 @@
       }
       ctx.clip();
     }
-    drawScaled(ctx, src, sx, sy, sw, sh, x, y, w, h);
+    if (fast) {
+      // Aperçu : dessin direct, beaucoup plus rapide (la réduction soignée est réservée à l'export).
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'medium';
+      ctx.drawImage(src, sx, sy, sw, sh, x, y, w, h);
+    } else {
+      drawScaled(ctx, src, sx, sy, sw, sh, x, y, w, h);
+    }
     ctx.restore();
   }
 
@@ -409,26 +416,77 @@
     layoutTimer = setTimeout(runLayout, 120);
   }
 
+  /* Le calcul tourne dans un Web Worker (hors du fil de l'interface).
+     Si le navigateur le refuse (ex. page ouverte en file://), on calcule ici. */
+  let worker = null;
+  let workerBusy = false;
+  let workerOk = typeof Worker !== 'undefined' && location.protocol !== 'file:';
+  let jobId = 0;
+
+  function applyLayout(res, photos, W, H, final) {
+    state.layout = { ...res, photos, W, H };
+    if (!state.exporting) hideBusy();
+    els.frame.classList.toggle('refining', !final);
+    drawPreview();
+  }
+
   function runLayout() {
     const photos = readyPhotos();
     updateButtons();
+    const job = ++jobId;
     if (!photos.length) {
+      if (workerBusy && worker) { worker.terminate(); worker = null; workerBusy = false; }
       state.layout = null;
+      els.frame.classList.remove('refining');
       drawPreview();
       return;
     }
-    showBusy('Composition…');
-    // laisse le navigateur afficher l'indicateur avant le calcul
+    const [W, H] = baseSize();
+    const gap = state.s.gap;
+    const ars = photos.map((p) => p.ar);
+    const opts = {
+      width: W, height: H, gap, padding: state.s.border ? gap : 0,
+      keepOrder: state.s.keepOrder, seed: state.seed,
+    };
+    // Première composition : gros indicateur. Ensuite : on garde l'aperçu
+    // actuel avec un petit badge pendant le calcul.
+    if (!state.layout) showBusy('Composition…');
+    els.frame.classList.add('refining');
+
+    if (workerOk) {
+      try {
+        // Un calcul en cours ne peut pas être interrompu : on relance un worker neuf.
+        if (worker && workerBusy) { worker.terminate(); worker = null; }
+        if (!worker) {
+          worker = new Worker('js/layout-worker.js');
+          worker.onerror = (e) => {
+            e.preventDefault();
+            workerOk = false; worker = null; workerBusy = false;
+            runLayout();
+          };
+        }
+        worker.onmessage = (e) => {
+          if (e.data.id !== jobId) return;
+          if (e.data.final) workerBusy = false;
+          applyLayout(e.data.res, photos, W, H, e.data.final);
+        };
+        workerBusy = true;
+        worker.postMessage({ id: job, ars, opts });
+        return;
+      } catch (e) {
+        workerOk = false;
+      }
+    }
+    // Repli : calcul direct, rapide puis affiné.
     setTimeout(() => {
-      const [W, H] = baseSize();
-      const gap = state.s.gap;
-      const res = MosaicLayout.computeLayout(photos.map((p) => p.ar), {
-        width: W, height: H, gap, padding: state.s.border ? gap : 0,
-        keepOrder: state.s.keepOrder, seed: state.seed, timeBudget: 160,
-      });
-      state.layout = { ...res, photos, W, H };
-      hideBusy();
-      drawPreview();
+      if (job !== jobId) return;
+      const quick = MosaicLayout.computeLayout(ars, { ...opts, timeBudget: 60 });
+      applyLayout(quick, photos, W, H, false);
+      setTimeout(() => {
+        if (job !== jobId) return;
+        const full = MosaicLayout.computeLayout(ars, { ...opts, timeBudget: 250 });
+        applyLayout(full.score < quick.score ? full : quick, photos, W, H, true);
+      }, 30);
     }, 30);
   }
 
@@ -454,7 +512,7 @@
       const p = L.photos[c.index];
       const x0 = Math.round(c.x * k), y0 = Math.round(c.y * k);
       const x1 = Math.round((c.x + c.w) * k), y1 = Math.round((c.y + c.h) * k);
-      drawCell(ctx, p.thumb, p.thumb.width, p.thumb.height, p.focus, x0, y0, x1 - x0, y1 - y0, state.s.radius * k);
+      drawCell(ctx, p.thumb, p.thumb.width, p.thumb.height, p.focus, x0, y0, x1 - x0, y1 - y0, state.s.radius * k, true);
     }
     updateMeta();
   }

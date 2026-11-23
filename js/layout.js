@@ -400,7 +400,7 @@
     candidates.sort((a, b) => a.score - b.score);
     const best = candidates[0];
     best.cells.forEach((c) => { c.x += pad; c.y += pad; });
-    return { cells: best.cells, cropPct: meanCropPct(ars, best.cells), direction: best.direction };
+    return { cells: best.cells, cropPct: meanCropPct(ars, best.cells), direction: best.direction, score: best.score };
   }
 
   const api = { computeLayout, scoreCells };

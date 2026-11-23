@@ -41,4 +41,5 @@ Exemple : 60 photos (12,9 Mo d'originaux) → mosaïque 4K JPEG d'environ 0,4–
 - `index.html` — interface
 - `css/style.css` — styles
 - `js/layout.js` — moteur de composition (utilisable aussi sous Node : `require('./js/layout.js')`)
+- `js/layout-worker.js` — calcul de la composition en arrière-plan (Web Worker)
 - `js/app.js` — import, aperçu, rendu et export
