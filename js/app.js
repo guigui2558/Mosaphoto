@@ -6,7 +6,7 @@
   const THUMB_MAX = 640;      // taille des vignettes en mémoire (aperçu)
   const SIDEBAR_THUMB = 120;  // vignettes de la liste
   const MASTER_MAX = 2560;    // copie de travail compressée, gardée dès l'import
-  const BASE = { landscape: [3840, 2160], portrait: [2160, 3840] };
+  const BASE = { landscape: [3840, 2160], portrait: [2160, 3840], square: [2160, 2160] };
   const RES_SCALE = { '4k': 1, '1080': 0.5 };
 
   const $ = (id) => document.getElementById(id);
@@ -363,6 +363,13 @@
 
   /* ---------------------------------------------------------------- layout */
 
+  // 1080p en carré = 1080 × 1080 (format des publications Instagram).
+  function updateResLabels() {
+    const [w, h] = BASE[state.s.orientation];
+    document.getElementById('res4k').textContent = `${w} × ${h}`;
+    document.getElementById('res1080').textContent = `${w / 2} × ${h / 2}`;
+  }
+
   function baseSize() { return BASE[state.s.orientation]; }
   function outSize() {
     const [w, h] = baseSize();
@@ -381,6 +388,7 @@
       if (!d) return;
       for (const k of Object.keys(state.s)) if (k in d.s && typeof d.s[k] === typeof state.s[k]) state.s[k] = d.s[k];
       if (d.seed) state.seed = d.seed;
+      if (!BASE[state.s.orientation]) state.s.orientation = 'landscape';
     } catch (e) { /* ignoré */ }
     document.querySelectorAll('.seg').forEach((seg) => {
       seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.value === state.s[seg.dataset.name]));
@@ -428,6 +436,8 @@
     saveSettings();
     const L = state.layout;
     els.frame.classList.toggle('portrait', state.s.orientation === 'portrait');
+    els.frame.classList.toggle('square', state.s.orientation === 'square');
+    updateResLabels();
     els.empty.hidden = !!L;
     const cv = els.preview;
     const rect = cv.getBoundingClientRect();
@@ -540,7 +550,7 @@
       cv.width = cv.height = 0;
 
       const ext = type === 'image/webp' ? 'webp' : 'jpg';
-      const name = `mosaique-${state.s.resolution === '4k' ? '4k' : '1080p'}-${state.s.orientation === 'portrait' ? 'portrait' : 'paysage'}-${L.photos.length}photos.${ext}`;
+      const name = `mosaique-${state.s.resolution === '4k' ? '4k' : '1080p'}-${{ portrait: 'portrait', square: 'carre', landscape: 'paysage' }[state.s.orientation]}-${L.photos.length}photos.${ext}`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = name;

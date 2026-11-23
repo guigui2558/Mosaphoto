@@ -9,7 +9,7 @@ Aucune installation, aucun serveur : ouvrez `index.html` dans un navigateur
 ## Fonctions
 
 - **Jusqu'à 100 photos** (glisser-déposer ou sélection), doublons ignorés, retrait individuel.
-- **2 presets de format** : Paysage (16:9) et Portrait (9:16).
+- **3 formats** : Paysage (16:9), Portrait (9:16) et Carré (1:1, 1080 × 1080 pour Instagram).
 - **2 qualités** : 4K (3840 × 2160) et 1080p (1920 × 1080). La composition est identique entre les deux.
 - **Composition intelligente** (`js/layout.js`) :
   - mise en page « justifiée » : un portrait prend une tuile haute et étroite, un paysage une tuile large ;
