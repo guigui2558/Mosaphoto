@@ -68,6 +68,11 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .dropzone svg { width: 26px; height: 26px; color: var(--accent); margin-bottom: 4px; }
 .dropzone strong { color: var(--text); font-weight: 600; }
 .dropzone span { font-size: 12px; }
+.dropzone .touch { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  .dropzone .desk { display: none; }
+  .dropzone .touch { display: inline; }
+}
 .dropzone:hover, .dropzone.over { border-color: var(--accent); background: rgba(108, 140, 255, .07); }
 
 .thumbs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; max-height: 190px; overflow-y: auto; }
