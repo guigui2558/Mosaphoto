@@ -89,6 +89,8 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .thumb.loading { animation: pulse 1s infinite alternate; }
 @keyframes pulse { from { opacity: .4; } to { opacity: .8; } }
 
+.btn.danger { color: var(--danger); border-color: rgba(255, 107, 107, .35); background: transparent; }
+.btn.danger:hover:not(:disabled) { background: rgba(255, 107, 107, .1); border-color: var(--danger); }
 .link { align-self: flex-start; background: none; border: 0; color: var(--muted); padding: 0; cursor: pointer; font: inherit; font-size: 12px; text-decoration: underline; }
 .link:hover { color: var(--danger); }
 

@@ -23,7 +23,7 @@ Aucune installation, aucun serveur : ouvrez `index.html` dans un navigateur
   bouton « Autre composition ».
 - Orientation EXIF respectée (photos de smartphone).
 - **Photos et réglages mémorisés** sur l'appareil (IndexedDB + localStorage) : après un
-  rechargement, tout est encore là sans réimporter. « Tout retirer » vide ce cache.
+  rechargement, tout est encore là sans réimporter. le bouton « Effacer toutes les photos » vide ce cache.
 
 ## Optimisation du poids
 

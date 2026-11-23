@@ -12,7 +12,7 @@
   const $ = (id) => document.getElementById(id);
   const els = {
     status: $('status'), count: $('count'), dropzone: $('dropzone'), fileInput: $('fileInput'),
-    thumbs: $('thumbs'), clearBtn: $('clearBtn'), gap: $('gap'), gapOut: $('gapOut'),
+    thumbs: $('thumbs'), clearBtn: $('clearBtn'), clearLabel: $('clearLabel'), gap: $('gap'), gapOut: $('gapOut'),
     radius: $('radius'), radiusOut: $('radiusOut'), bg: $('bg'), border: $('border'),
     keepOrder: $('keepOrder'), shuffleBtn: $('shuffleBtn'), quality: $('quality'),
     qualityOut: $('qualityOut'), maxSize: $('maxSize'), exportBtn: $('exportBtn'),
@@ -311,12 +311,24 @@
     const n = state.photos.length;
     els.count.textContent = `${n} / ${MAX_PHOTOS}`;
     els.clearBtn.hidden = n === 0;
+    updateStorageLabel();
+  }
+
+  /* Affiche la place occupée par les photos mémorisées sur l'appareil. */
+  let storageTimer = 0;
+  function updateStorageLabel() {
+    clearTimeout(storageTimer);
+    storageTimer = setTimeout(() => {
+      const bytes = state.photos.reduce((s, p) => s + (p.master ? p.master.size : 0), 0);
+      els.clearLabel.textContent = 'Effacer toutes les photos' + (bytes ? ` (${fmtBytes(bytes)})` : '');
+    }, 300);
   }
 
   function updateThumb(p) {
     const d = els.thumbs.querySelector(`[data-id="${p.id}"]`);
     if (!d) return;
     d.classList.toggle('loading', !p.ready);
+    updateStorageLabel();
     d.innerHTML = '';
     if (p.ready) {
       const img = document.createElement('img');
@@ -587,12 +599,15 @@
   els.shuffleBtn.addEventListener('click', () => { state.seed = (state.seed * 48271 + 11) % 2147483647; scheduleLayout(); });
   els.exportBtn.addEventListener('click', exportMosaic);
   els.clearBtn.addEventListener('click', () => {
+    const n = state.photos.length;
+    if (!confirm(`Effacer les ${n} photo${n > 1 ? 's' : ''} de Mosaphoto ?\n\nElles seront aussi supprimées de la mémoire de l\u2019appareil. Tes photos d\u2019origine (galerie, Google Photos) ne sont pas touchées.`)) return;
     state.photos.forEach((p) => { if (p.thumb) p.thumb.width = p.thumb.height = 0; });
     state.photos = [];
     cache.clear();
     els.result.hidden = true;
-    renderThumbs(); setStatus(); scheduleLayout();
+    renderThumbs(); setStatus('Photos effacées.'); scheduleLayout();
   });
+
 
   els.fileInput.addEventListener('change', () => { addFiles(els.fileInput.files); els.fileInput.value = ''; });
   ['dragenter', 'dragover'].forEach((t) => document.addEventListener(t, (e) => { e.preventDefault(); els.dropzone.classList.add('over'); }));
