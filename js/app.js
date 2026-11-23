@@ -5,6 +5,7 @@
   const MAX_PHOTOS = 100;
   const THUMB_MAX = 640;      // taille des vignettes en mémoire (aperçu)
   const SIDEBAR_THUMB = 120;  // vignettes de la liste
+  const MASTER_MAX = 2560;    // copie de travail compressée, gardée dès l'import
   const BASE = { landscape: [3840, 2160], portrait: [2160, 3840] };
   const RES_SCALE = { '4k': 1, '1080': 0.5 };
 
@@ -193,6 +194,21 @@
       drawScaled(st.getContext('2d'), t, 0, 0, t.width, t.height, 0, 0, st.width, st.height);
       p.thumbUrl = st.toDataURL('image/jpeg', 0.7);
       p.focus = computeFocus(t);
+      // Copie de travail : sur mobile, le fichier d'origine peut devenir
+      // illisible après l'import (accès temporaire du sélecteur de photos,
+      // photos Google Photos dans le cloud…). On garde donc une version
+      // réduite et compressée, suffisante pour l'export, sans dépendre du fichier.
+      const km = Math.min(1, MASTER_MAX / Math.max(p.w, p.h));
+      if (km < 1 || !/^image\/(jpeg|png|webp)$/.test(p.file.type)) {
+        const m = canvas(p.w * km, p.h * km);
+        drawScaled(m.getContext('2d'), img, 0, 0, p.w, p.h, 0, 0, m.width, m.height);
+        p.master = await new Promise((r) => m.toBlob(r, 'image/jpeg', 0.92));
+        p.masterW = m.width; p.masterH = m.height;
+        m.width = m.height = 0;
+      } else {
+        p.master = new Blob([await p.file.arrayBuffer()], { type: p.file.type }); // déjà petit : vraie copie en mémoire
+        p.masterW = p.w; p.masterH = p.h;
+      }
       p.ready = true;
     } finally {
       release();
@@ -349,6 +365,7 @@
       ctx.fillStyle = state.s.bg;
       ctx.fillRect(0, 0, W, H);
       let done = 0;
+      let fallbacks = 0;
       // Les originaux sont décodés un par un puis libérés : mémoire maîtrisée.
       for (const c of L.cells) {
         showBusy(`Rendu ${++done} / ${L.cells.length}…`);
@@ -358,12 +375,24 @@
         const cw = x1 - x0, ch = y1 - y0;
         // Si la vignette suffit (petite cellule), inutile de décoder l'original.
         const need = Math.max(cw / p.thumb.width, ch / p.thumb.height);
-        if (need <= 0.9) {
+        // Source la plus légère suffisante : vignette → copie de travail → original.
+        // Si une source est illisible, on se rabat sur la précédente.
+        const needM = p.masterW ? Math.max(cw / p.masterW, ch / p.masterH) : 2;
+        const sources = need <= 0.9 ? [] : needM <= 1 ? [p.master] : [p.file, p.master];
+        let drawn = false;
+        for (const src of sources) {
+          if (!src) continue;
+          try {
+            const { img, release } = await loadImage(src);
+            drawCell(ctx, img, img.naturalWidth, img.naturalHeight, p.focus, x0, y0, cw, ch, state.s.radius * k);
+            release();
+            drawn = true;
+            break;
+          } catch (e) { /* source suivante */ }
+        }
+        if (!drawn) {
+          if (sources.length) fallbacks++;
           drawCell(ctx, p.thumb, p.thumb.width, p.thumb.height, p.focus, x0, y0, cw, ch, state.s.radius * k);
-        } else {
-          const { img, release } = await loadImage(p.file);
-          drawCell(ctx, img, img.naturalWidth, img.naturalHeight, p.focus, x0, y0, cw, ch, state.s.radius * k);
-          release();
         }
         if (done % 4 === 0) await new Promise((r) => setTimeout(r, 0));
       }
@@ -395,6 +424,7 @@
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
 
+      if (fallbacks) note += ` · ${fallbacks} photo(s) illisible(s) au moment de l\u2019export, rendue(s) depuis l\u2019aperçu (moins net)`;
       const total = L.photos.reduce((s, x) => s + x.size, 0);
       els.result.innerHTML = `<b>${name}</b><br>${W} × ${H} · <b>${fmtBytes(blob.size)}</b> (originaux : ${fmtBytes(total)})${note}`;
       els.result.hidden = false;
