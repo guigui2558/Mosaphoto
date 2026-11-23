@@ -144,7 +144,7 @@
       if (known.has(key)) continue;
       if (state.photos.length + fresh.length >= MAX_PHOTOS) { skipped++; continue; }
       known.add(key);
-      fresh.push({ id: nextId++, key, file: f, name: f.name, size: f.size, ready: false });
+      fresh.push({ id: nextId++, key, pos: Date.now() + fresh.length, file: f, name: f.name, size: f.size, ready: false });
     }
     if (!fresh.length) {
       if (skipped) setStatus(`Limite de ${MAX_PHOTOS} photos atteinte.`);
@@ -177,6 +177,97 @@
     scheduleLayout();
   }
 
+  /* Vignettes en mémoire (aperçu + liste) : on ne garde jamais l'original décodé. */
+  function makeThumbs(p, img, w, h) {
+    const k = Math.min(1, THUMB_MAX / Math.max(w, h));
+    const t = canvas(w * k, h * k);
+    drawScaled(t.getContext('2d'), img, 0, 0, w, h, 0, 0, t.width, t.height);
+    p.thumb = t;
+    const k2 = SIDEBAR_THUMB / Math.min(t.width, t.height);
+    const st = canvas(t.width * k2, t.height * k2);
+    drawScaled(st.getContext('2d'), t, 0, 0, t.width, t.height, 0, 0, st.width, st.height);
+    p.thumbUrl = st.toDataURL('image/jpeg', 0.7);
+  }
+
+  /* ----------------------------------------------------------------- cache
+     Les copies de travail sont gardées dans le navigateur (IndexedDB) :
+     après un rechargement, les photos sont toujours là, sans réimport.
+     Rien ne quitte l'appareil. Tout échec (navigation privée…) est ignoré. */
+  const cache = (() => {
+    let dbp = null;
+    function db() {
+      if (!dbp) {
+        dbp = new Promise((res, rej) => {
+          if (!window.indexedDB) return rej(new Error('IndexedDB indisponible'));
+          const r = indexedDB.open('mosaphoto', 1);
+          r.onupgradeneeded = () => r.result.createObjectStore('photos', { keyPath: 'key' });
+          r.onsuccess = () => res(r.result);
+          r.onerror = () => rej(r.error);
+        });
+      }
+      return dbp;
+    }
+    async function run(mode, fn) {
+      try {
+        const d = await db();
+        return await new Promise((res, rej) => {
+          const tx = d.transaction('photos', mode);
+          const out = fn(tx.objectStore('photos'));
+          tx.oncomplete = () => res(out && out.result);
+          tx.onerror = () => rej(tx.error);
+          tx.onabort = () => rej(tx.error);
+        });
+      } catch (e) {
+        console.warn('Cache photos :', e);
+        return null;
+      }
+    }
+    let persistAsked = false;
+    return {
+      put(p) {
+        if (!persistAsked && navigator.storage && navigator.storage.persist) { persistAsked = true; navigator.storage.persist().catch(() => {}); }
+        return run('readwrite', (st) => st.put({
+          key: p.key, pos: p.pos, name: p.name, size: p.size, w: p.w, h: p.h, focus: p.focus,
+          master: p.master, masterW: p.masterW, masterH: p.masterH,
+        }));
+      },
+      remove(key) { return run('readwrite', (st) => st.delete(key)); },
+      clear() { return run('readwrite', (st) => st.clear()); },
+      async all() { return (await run('readonly', (st) => st.getAll())) || []; },
+    };
+  })();
+
+  async function restoreFromCache() {
+    const recs = (await cache.all()).sort((a, b) => a.pos - b.pos).slice(0, MAX_PHOTOS);
+    if (!recs.length) return;
+    setStatus(`Restauration de ${recs.length} photo${recs.length > 1 ? 's' : ''}…`);
+    const photos = recs.map((r) => ({
+      id: nextId++, key: r.key, pos: r.pos, file: null, name: r.name, size: r.size,
+      w: r.w, h: r.h, ar: r.w / r.h, focus: r.focus,
+      master: r.master, masterW: r.masterW, masterH: r.masterH, ready: false,
+    }));
+    state.photos.push(...photos);
+    renderThumbs();
+    let i = 0;
+    const bad = [];
+    const worker = async () => {
+      while (i < photos.length) {
+        const p = photos[i++];
+        try {
+          const { img, release } = await loadImage(p.master);
+          makeThumbs(p, img, img.naturalWidth, img.naturalHeight);
+          release();
+          p.ready = true;
+        } catch (e) { bad.push(p); }
+        updateThumb(p);
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    for (const p of bad) removePhoto(p.id);
+    setStatus(null);
+    scheduleLayout();
+  }
+
   async function preparePhoto(p) {
     const { img, release } = await loadImage(p.file);
     try {
@@ -184,16 +275,8 @@
       p.h = img.naturalHeight;
       if (!p.w || !p.h) throw new Error('image vide');
       p.ar = p.w / p.h;
-      // Vignette en mémoire (aperçu) : on ne garde jamais l'original décodé.
-      const k = Math.min(1, THUMB_MAX / Math.max(p.w, p.h));
-      const t = canvas(p.w * k, p.h * k);
-      drawScaled(t.getContext('2d'), img, 0, 0, p.w, p.h, 0, 0, t.width, t.height);
-      p.thumb = t;
-      const k2 = SIDEBAR_THUMB / Math.min(t.width, t.height);
-      const st = canvas(t.width * k2, t.height * k2);
-      drawScaled(st.getContext('2d'), t, 0, 0, t.width, t.height, 0, 0, st.width, st.height);
-      p.thumbUrl = st.toDataURL('image/jpeg', 0.7);
-      p.focus = computeFocus(t);
+      makeThumbs(p, img, img.naturalWidth, img.naturalHeight);
+      p.focus = computeFocus(p.thumb);
       // Copie de travail : sur mobile, le fichier d'origine peut devenir
       // illisible après l'import (accès temporaire du sélecteur de photos,
       // photos Google Photos dans le cloud…). On garde donc une version
@@ -213,6 +296,7 @@
     } finally {
       release();
     }
+    cache.put(p);
   }
 
   function renderThumbs() {
@@ -257,7 +341,9 @@
 
   function removePhoto(id) {
     const p = state.photos.find((x) => x.id === id);
-    if (p && p.thumb) { p.thumb.width = p.thumb.height = 0; }
+    if (!p) return;
+    if (p.thumb) { p.thumb.width = p.thumb.height = 0; }
+    cache.remove(p.key);
     state.photos = state.photos.filter((x) => x.id !== id);
     renderThumbs();
     scheduleLayout();
@@ -273,8 +359,32 @@
   }
   function readyPhotos() { return state.photos.filter((p) => p.ready); }
 
+  function saveSettings() {
+    try { localStorage.setItem('mosaphoto.settings', JSON.stringify({ s: state.s, seed: state.seed })); } catch (e) { /* ignoré */ }
+  }
+
+  function loadSettings() {
+    try {
+      const d = JSON.parse(localStorage.getItem('mosaphoto.settings') || 'null');
+      if (!d) return;
+      for (const k of Object.keys(state.s)) if (k in d.s && typeof d.s[k] === typeof state.s[k]) state.s[k] = d.s[k];
+      if (d.seed) state.seed = d.seed;
+    } catch (e) { /* ignoré */ }
+    document.querySelectorAll('.seg').forEach((seg) => {
+      seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.value === state.s[seg.dataset.name]));
+    });
+    els.gap.value = state.s.gap; els.gapOut.textContent = state.s.gap + ' px';
+    els.radius.value = state.s.radius; els.radiusOut.textContent = state.s.radius + ' px';
+    els.bg.value = state.s.bg;
+    els.border.checked = state.s.border;
+    els.keepOrder.checked = state.s.keepOrder;
+    els.quality.value = state.s.quality; els.qualityOut.textContent = state.s.quality;
+    els.maxSize.value = String(state.s.maxSize);
+  }
+
   let layoutTimer = 0;
   function scheduleLayout() {
+    saveSettings();
     clearTimeout(layoutTimer);
     layoutTimer = setTimeout(runLayout, 120);
   }
@@ -303,6 +413,7 @@
   }
 
   function drawPreview() {
+    saveSettings();
     const L = state.layout;
     els.frame.classList.toggle('portrait', state.s.orientation === 'portrait');
     els.empty.hidden = !!L;
@@ -443,7 +554,7 @@
 
   function setStatus(msg) {
     const n = state.photos.length;
-    els.status.textContent = msg || (n ? `${n} photo${n > 1 ? 's' : ''} · tout est traité localement` : 'Ajoutez des photos pour commencer');
+    els.status.textContent = msg || (n ? `${n} photo${n > 1 ? 's' : ''} · gardées sur cet appareil` : 'Ajoutez des photos pour commencer');
   }
   function showBusy(t) { els.busyText.textContent = t; els.busy.hidden = false; }
   function hideBusy() { els.busy.hidden = true; }
@@ -460,6 +571,7 @@
       if (!b || b.disabled) return;
       seg.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
       state.s[name] = b.dataset.value;
+      saveSettings();
       if (name === 'orientation') scheduleLayout();
       else updateMeta();
     });
@@ -470,13 +582,14 @@
   els.bg.addEventListener('input', () => { state.s.bg = els.bg.value; drawPreview(); });
   els.border.addEventListener('change', () => { state.s.border = els.border.checked; scheduleLayout(); });
   els.keepOrder.addEventListener('change', () => { state.s.keepOrder = els.keepOrder.checked; scheduleLayout(); });
-  els.quality.addEventListener('input', () => { state.s.quality = +els.quality.value; els.qualityOut.textContent = els.quality.value; });
-  els.maxSize.addEventListener('change', () => { state.s.maxSize = +els.maxSize.value; });
+  els.quality.addEventListener('input', () => { state.s.quality = +els.quality.value; els.qualityOut.textContent = els.quality.value; saveSettings(); });
+  els.maxSize.addEventListener('change', () => { state.s.maxSize = +els.maxSize.value; saveSettings(); });
   els.shuffleBtn.addEventListener('click', () => { state.seed = (state.seed * 48271 + 11) % 2147483647; scheduleLayout(); });
   els.exportBtn.addEventListener('click', exportMosaic);
   els.clearBtn.addEventListener('click', () => {
     state.photos.forEach((p) => { if (p.thumb) p.thumb.width = p.thumb.height = 0; });
     state.photos = [];
+    cache.clear();
     els.result.hidden = true;
     renderThumbs(); setStatus(); scheduleLayout();
   });
@@ -492,11 +605,17 @@
   let resizeTimer = 0;
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawPreview, 100); });
 
+  loadSettings();
   // WebP : désactivé si le navigateur ne sait pas l'encoder (ex. anciens Safari).
   if (!canvas(1, 1).toDataURL('image/webp').startsWith('data:image/webp')) {
     els.webpBtn.disabled = true;
     els.webpBtn.title = 'Non pris en charge par ce navigateur';
+    if (state.s.format === 'image/webp') {
+      state.s.format = 'image/jpeg';
+      els.webpBtn.classList.remove('on');
+      document.querySelector('[data-value="image/jpeg"]').classList.add('on');
+    }
   }
-
   drawPreview();
+  restoreFromCache();
 })();

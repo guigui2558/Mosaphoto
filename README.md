@@ -22,6 +22,8 @@ Aucune installation, aucun serveur : ouvrez `index.html` dans un navigateur
 - Réglages : espacement, coins arrondis, couleur de fond, bordure, garder l'ordre d'import,
   bouton « Autre composition ».
 - Orientation EXIF respectée (photos de smartphone).
+- **Photos et réglages mémorisés** sur l'appareil (IndexedDB + localStorage) : après un
+  rechargement, tout est encore là sans réimporter. « Tout retirer » vide ce cache.
 
 ## Optimisation du poids
 
