@@ -15,7 +15,8 @@
     thumbs: $('thumbs'), clearBtn: $('clearBtn'), clearLabel: $('clearLabel'), gap: $('gap'), gapOut: $('gapOut'),
     radius: $('radius'), radiusOut: $('radiusOut'), bg: $('bg'), border: $('border'),
     keepOrder: $('keepOrder'), shuffleBtn: $('shuffleBtn'), quality: $('quality'),
-    qualityOut: $('qualityOut'), maxSize: $('maxSize'), exportBtn: $('exportBtn'),
+    qualityOut: $('qualityOut'), maxSize: $('maxSize'), slides: $('slides'), slidesOpts: $('slidesOpts'), pano: $('pano'), slidesHint: $('slidesHint'),
+    shareBtn: $('shareBtn'), shareLabel: $('shareLabel'), exportBtn: $('exportBtn'),
     result: $('result'), frame: $('frame'), preview: $('preview'), empty: $('empty'),
     progress: $('progress'), progressFill: $('progressFill'), progressText: $('progressText'),
     exportLabel: $('exportLabel'), exportFill: $('exportFill'), meta: $('meta'), webpBtn: $('webpBtn'),
@@ -29,7 +30,7 @@
     s: {
       orientation: 'landscape', resolution: '4k', format: 'image/jpeg',
       gap: 8, radius: 0, bg: '#ffffff', border: true, keepOrder: false,
-      quality: 85, maxSize: 5,
+      quality: 85, maxSize: 5, slides: 1, pano: false,
     },
   };
   let nextId = 1;
@@ -415,6 +416,9 @@
     els.keepOrder.checked = state.s.keepOrder;
     els.quality.value = state.s.quality; els.qualityOut.textContent = state.s.quality;
     els.maxSize.value = String(state.s.maxSize);
+    if (![...els.slides.options].some((o) => +o.value === state.s.slides)) state.s.slides = 1;
+    els.slides.value = String(state.s.slides);
+    els.pano.checked = state.s.pano;
   }
 
   let layoutTimer = 0;
@@ -453,8 +457,10 @@
   }
 
   function applyLayout(res, photos, W, H, final) {
-    state.layout = { ...res, photos, W, H };
+    // W = largeur d'une slide ; L.W = largeur totale (toutes les slides côte à côte).
+    state.layout = { ...res, photos, slideW: W, W: W * (res.slides || 1), H };
     if (final) stopLayoutProgress();
+    updateExportLabel();
     drawPreview();
   }
 
@@ -475,6 +481,7 @@
     const opts = {
       width: W, height: H, gap, padding: state.s.border ? gap : 0,
       keepOrder: state.s.keepOrder, seed: state.seed,
+      slides: state.s.slides, pano: state.s.pano,
     };
     // Première composition : gros indicateur. Ensuite : on garde l'aperçu
     // actuel avec un petit badge pendant le calcul.
@@ -509,12 +516,12 @@
     setTimeout(() => {
       if (job !== jobId) return;
       const t0 = performance.now();
-      const quick = MosaicLayout.computeLayout(ars, { ...opts, timeBudget: 60 });
+      const quick = MosaicLayout.computeSlides(ars, { ...opts, timeBudget: 60 });
       layoutProg.expected = (performance.now() - t0) * 3 + 750;
       applyLayout(quick, photos, W, H, false);
       setTimeout(() => {
         if (job !== jobId) return;
-        const full = MosaicLayout.computeLayout(ars, { ...opts, timeBudget: 250 });
+        const full = MosaicLayout.computeSlides(ars, { ...opts, timeBudget: 250 });
         applyLayout(full.score < quick.score ? full : quick, photos, W, H, true);
       }, 30);
     }, 30);
@@ -523,10 +530,10 @@
   function drawPreview() {
     saveSettings();
     const L = state.layout;
-    els.frame.classList.toggle('portrait', state.s.orientation === 'portrait');
-    els.frame.classList.toggle('square', state.s.orientation === 'square');
-    els.frame.classList.toggle('insta', state.s.orientation === 'insta');
     updateResLabels();
+    updateSlidesUI();
+    const [bw, bh] = baseSize();
+    sizeFrame((bw * (L ? L.slides || 1 : nSlides())) / bh);
     els.empty.hidden = !!L;
     const cv = els.preview;
     const rect = cv.getBoundingClientRect();
@@ -544,7 +551,66 @@
       const x1 = Math.round((c.x + c.w) * k), y1 = Math.round((c.y + c.h) * k);
       drawCell(ctx, p.thumb, p.thumb.width, p.thumb.height, p.focus, x0, y0, x1 - x0, y1 - y0, state.s.radius * k, true);
     }
+    if (L.slides > 1) drawSlideMarks(ctx, L, k);
     updateMeta();
+  }
+
+  /* Nombre de slides effectif (pas plus que de photos). */
+  function nSlides() {
+    return Math.max(1, Math.min(state.s.slides, readyPhotos().length || state.s.slides));
+  }
+
+  /* Taille exacte du cadre d'aperçu pour qu'il tienne dans la zone, quel que soit le ratio. */
+  function sizeFrame(aspect) {
+    const st = els.frame.parentElement;
+    const cs = getComputedStyle(st);
+    const aw = st.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const ah = st.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - els.meta.offsetHeight - 14;
+    let w = aw, h = aw / aspect;
+    if (h > ah && ah > 50) { h = ah; w = h * aspect; }
+    els.frame.style.aspectRatio = 'auto';
+    els.frame.style.width = Math.floor(w) + 'px';
+    els.frame.style.height = Math.floor(h) + 'px';
+  }
+
+  /* Aperçu : pointillés aux limites des slides + numéros. */
+  function drawSlideMarks(ctx, L, k) {
+    const dpr = window.devicePixelRatio || 1;
+    ctx.save();
+    ctx.setLineDash([6 * dpr, 5 * dpr]);
+    ctx.lineWidth = 1.5 * dpr;
+    for (let s = 1; s < L.slides; s++) {
+      const x = Math.round(s * L.slideW * k) + 0.5;
+      ctx.strokeStyle = 'rgba(0,0,0,.55)';
+      ctx.beginPath(); ctx.moveTo(x + dpr, 0); ctx.lineTo(x + dpr, ctx.canvas.height); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,.95)';
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ctx.canvas.height); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    const fs = Math.max(10, Math.min(13, L.slideW * k / 8 / dpr)) * dpr;
+    ctx.font = `600 ${fs}px system-ui, sans-serif`;
+    ctx.textBaseline = 'middle';
+    for (let s = 0; s < L.slides; s++) {
+      const label = `${s + 1}/${L.slides}`;
+      const tw = ctx.measureText(label).width;
+      const x = s * L.slideW * k + 6 * dpr, y = ctx.canvas.height - 6 * dpr - fs;
+      ctx.fillStyle = 'rgba(15,17,21,.75)';
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x, y, tw + fs, fs * 1.6, fs * 0.8); ctx.fill(); }
+      else ctx.fillRect(x, y, tw + fs, fs * 1.6);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(label, x + fs / 2, y + fs * 0.8);
+    }
+    ctx.restore();
+  }
+
+  function updateSlidesUI() {
+    const on = state.s.slides > 1;
+    els.slidesOpts.hidden = !on;
+    if (!on) return;
+    const [w, h] = outSize();
+    els.slidesHint.textContent = state.s.pano
+      ? `Une grande mosaïque découpée en ${state.s.slides} images de ${w} × ${h} : des photos continuent d'une slide à l'autre quand on fait défiler.`
+      : `Une mosaïque par slide (${state.s.slides} images de ${w} × ${h}), aucune photo n'est coupée entre deux slides.`;
   }
 
   function updateMeta() {
@@ -556,9 +622,9 @@
     const nL = p.filter((x) => x.ar > 1.05).length;
     const nS = p.length - nP - nL;
     const total = p.reduce((s, x) => s + x.size, 0);
-    const dir = { rows: 'en rangées', cols: 'en colonnes', tree: 'en blocs' }[L.direction];
+    const dir = { rows: 'en rangées', cols: 'en colonnes', tree: 'en blocs', slides: 'une mosaïque par slide' }[L.direction];
     const parts = [
-      `${w} × ${h}`,
+      L.slides > 1 ? `${L.slides} slides de ${w} × ${h}${L.mode === 'pano' ? ' (panorama)' : ''}` : `${w} × ${h}`,
       `${p.length} photo${p.length > 1 ? 's' : ''} (${nL} paysage, ${nP} portrait${nS ? `, ${nS} carrée` : ''})`,
       `composition ${dir}`,
       `recadrage moyen ${L.cropPct < 0.1 ? '< 0,1' : L.cropPct.toFixed(1).replace('.', ',')} %`,
@@ -573,96 +639,166 @@
     return new Promise((res) => cv.toBlob(res, type, q));
   }
 
+  /* Dessine une photo (source la plus légère suffisante) dans une cellule. */
+  async function renderCell(ctx, p, x0, y0, cw, ch, radius) {
+    // Vignette → copie de travail → original ; si une source est illisible,
+    // on se rabat sur la suivante, puis sur la vignette en dernier recours.
+    const need = Math.max(cw / p.thumb.width, ch / p.thumb.height);
+    const needM = p.masterW ? Math.max(cw / p.masterW, ch / p.masterH) : 2;
+    const sources = need <= 0.9 ? [] : needM <= 1 ? [p.master] : [p.file, p.master];
+    for (const src of sources) {
+      if (!src) continue;
+      try {
+        const { img, release } = await loadImage(src);
+        drawCell(ctx, img, img.naturalWidth, img.naturalHeight, p.focus, x0, y0, cw, ch, radius);
+        release();
+        return true;
+      } catch (e) { /* source suivante */ }
+    }
+    drawCell(ctx, p.thumb, p.thumb.width, p.thumb.height, p.focus, x0, y0, cw, ch, radius);
+    return sources.length === 0;
+  }
+
+  /* Encode une image en respectant la limite de poids (dichotomie sur la qualité). */
+  async function encode(cv, onStep) {
+    const type = state.s.format;
+    const limit = state.s.maxSize * 1024 * 1024;
+    let q = state.s.quality / 100;
+    let blob = await toBlob(cv, type, q);
+    let status = 'ok';
+    if (limit && blob.size > limit) {
+      let lo = 0.4, hi = q, best = null;
+      for (let i = 0; i < 7; i++) {
+        onStep((i + 1) / 8);
+        const mid = (lo + hi) / 2;
+        const b = await toBlob(cv, type, mid);
+        if (b.size <= limit) { best = { b, q: mid }; lo = mid; } else hi = mid;
+      }
+      if (best) { blob = best.b; q = best.q; status = 'adjusted'; }
+      else { blob = await toBlob(cv, type, 0.4); q = 0.4; status = 'min'; }
+    }
+    return { blob, q, status };
+  }
+
+  function downloadBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 20000);
+  }
+
   async function exportMosaic() {
     const L = state.layout;
     if (!L || state.exporting) return;
     state.exporting = true;
+    state.lastFiles = null;
+    els.shareBtn.hidden = true;
     updateButtons();
     els.result.hidden = true;
-    const [W, H] = outSize();
-    const k = W / L.W;
+    const [W, H] = outSize();          // taille d'UNE image exportée
+    const N = L.slides || 1;
+    const k = W / L.slideW;
+    const radius = state.s.radius * k;
+    const ext = state.s.format === 'image/webp' ? 'webp' : 'jpg';
+    const fmt = { portrait: 'portrait', square: 'carre', insta: '4x5', landscape: 'paysage' }[state.s.orientation];
+    const res = state.s.resolution === '4k' ? '4k' : '1080p';
     try {
-      const cv = canvas(W, H);
-      const ctx = cv.getContext('2d');
-      ctx.fillStyle = state.s.bg;
-      ctx.fillRect(0, 0, W, H);
-      let done = 0;
-      let fallbacks = 0;
-      // Les originaux sont décodés un par un puis libérés : mémoire maîtrisée.
-      for (const c of L.cells) {
-        setExportProgress(0.9 * done++ / L.cells.length, `Rendu ${done} / ${L.cells.length} ·`);
-        const p = L.photos[c.index];
-        const x0 = Math.round(c.x * k), y0 = Math.round(c.y * k);
-        const x1 = Math.round((c.x + c.w) * k), y1 = Math.round((c.y + c.h) * k);
-        const cw = x1 - x0, ch = y1 - y0;
-        // Si la vignette suffit (petite cellule), inutile de décoder l'original.
-        const need = Math.max(cw / p.thumb.width, ch / p.thumb.height);
-        // Source la plus légère suffisante : vignette → copie de travail → original.
-        // Si une source est illisible, on se rabat sur la précédente.
-        const needM = p.masterW ? Math.max(cw / p.masterW, ch / p.masterH) : 2;
-        const sources = need <= 0.9 ? [] : needM <= 1 ? [p.master] : [p.file, p.master];
-        let drawn = false;
-        for (const src of sources) {
-          if (!src) continue;
-          try {
-            const { img, release } = await loadImage(src);
-            drawCell(ctx, img, img.naturalWidth, img.naturalHeight, p.focus, x0, y0, cw, ch, state.s.radius * k);
-            release();
-            drawn = true;
-            break;
-          } catch (e) { /* source suivante */ }
+      // Cellules de chaque slide (une photo à cheval apparaît dans deux slides).
+      const perSlide = [];
+      for (let sI = 0; sI < N; sI++) {
+        const left = sI * L.slideW, right = left + L.slideW;
+        perSlide.push(L.cells.filter((c) => c.x < right - 0.5 && c.x + c.w > left + 0.5));
+      }
+      const totalDraws = perSlide.reduce((t, a) => t + a.length, 0);
+      let done = 0, fallbacks = 0;
+      const files = [];
+      let adjusted = 0, atMin = 0;
+      for (let sI = 0; sI < N; sI++) {
+        const cv = canvas(W, H);
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = state.s.bg;
+        ctx.fillRect(0, 0, W, H);
+        const off = sI * W;
+        for (const c of perSlide[sI]) {
+          done++;
+          setExportProgress(0.88 * done / totalDraws, N > 1 ? `Slide ${sI + 1}/${N} ·` : `Rendu ${done} / ${totalDraws} ·`);
+          const p = L.photos[c.index];
+          const x0 = Math.round(c.x * k) - off, y0 = Math.round(c.y * k);
+          const x1 = Math.round((c.x + c.w) * k) - off, y1 = Math.round((c.y + c.h) * k);
+          if (!(await renderCell(ctx, p, x0, y0, x1 - x0, y1 - y0, radius))) fallbacks++;
+          if (done % 4 === 0) await new Promise((r) => setTimeout(r, 0));
         }
-        if (!drawn) {
-          if (sources.length) fallbacks++;
-          drawCell(ctx, p.thumb, p.thumb.width, p.thumb.height, p.focus, x0, y0, cw, ch, state.s.radius * k);
-        }
-        if (done % 4 === 0) await new Promise((r) => setTimeout(r, 0));
+        const base = 0.88 + 0.12 * sI / N;
+        setExportProgress(base, 'Compression');
+        await new Promise((r) => setTimeout(r, 0));
+        const enc = await encode(cv, (f) => setExportProgress(base + 0.12 * f / N, 'Ajustement du poids'));
+        if (enc.status === 'adjusted') adjusted++;
+        if (enc.status === 'min') atMin++;
+        cv.width = cv.height = 0;
+        const name = N > 1
+          ? `mosaique-carrousel-${fmt}-${String(sI + 1).padStart(2, '0')}-sur-${N}.${ext}`
+          : `mosaique-${res}-${fmt}-${L.photos.length}photos.${ext}`;
+        files.push({ name, blob: enc.blob });
       }
 
-      setExportProgress(0.9, 'Compression');
-      await new Promise((r) => setTimeout(r, 0));
-      const type = state.s.format;
-      const limit = state.s.maxSize * 1024 * 1024;
-      let q = state.s.quality / 100;
-      let blob = await toBlob(cv, type, q);
+      // Téléchargement : un fichier par slide, espacés pour que le navigateur les accepte.
+      for (let i = 0; i < files.length; i++) {
+        downloadBlob(files[i].blob, files[i].name);
+        if (i < files.length - 1) await new Promise((r) => setTimeout(r, 350));
+      }
+      state.lastFiles = files;
+
       let note = '';
-      if (limit && blob.size > limit) {
-        // Recherche dichotomique de la meilleure qualité sous la limite.
-        let lo = 0.4, hi = q, best = null;
-        for (let i = 0; i < 7; i++) {
-          const mid = (lo + hi) / 2;
-          setExportProgress(0.9 + 0.1 * (i + 1) / 8, 'Ajustement du poids');
-          const b = await toBlob(cv, type, mid);
-          if (b.size <= limit) { best = { b, q: mid }; lo = mid; } else hi = mid;
-        }
-        if (best) { blob = best.b; q = best.q; note = ` · qualité ajustée à ${Math.round(q * 100)} pour tenir sous ${state.s.maxSize} Mo`; }
-        else { blob = await toBlob(cv, type, 0.4); q = 0.4; note = ` · impossible de descendre sous ${state.s.maxSize} Mo, qualité minimale utilisée`; }
-      }
-      cv.width = cv.height = 0;
-
-      const ext = type === 'image/webp' ? 'webp' : 'jpg';
-      const name = `mosaique-${state.s.resolution === '4k' ? '4k' : '1080p'}-${{ portrait: 'portrait', square: 'carre', insta: '4x5', landscape: 'paysage' }[state.s.orientation]}-${L.photos.length}photos.${ext}`;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = name;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-
+      if (adjusted) note += ` · qualité réduite sur ${N > 1 ? `${adjusted} slide(s)` : 'l\u2019image'} pour tenir sous ${state.s.maxSize} Mo`;
+      if (atMin) note += ` · ${atMin > 1 || N > 1 ? `${atMin} image(s)` : 'image'} au-dessus de ${state.s.maxSize} Mo même en qualité minimale`;
       if (fallbacks) note += ` · ${fallbacks} photo(s) illisible(s) au moment de l\u2019export, rendue(s) depuis l\u2019aperçu (moins net)`;
-      const total = L.photos.reduce((s, x) => s + x.size, 0);
-      els.result.innerHTML = `<b>${name}</b><br>${W} × ${H} · <b>${fmtBytes(blob.size)}</b> (originaux : ${fmtBytes(total)})${note}`;
+      const total = L.photos.reduce((t, x) => t + x.size, 0);
+      const weight = files.reduce((t, f) => t + f.blob.size, 0);
+      els.result.innerHTML = N > 1
+        ? `<b>${N} images</b> de ${W} × ${H} · <b>${fmtBytes(weight)}</b> au total (originaux : ${fmtBytes(total)})${note}<br><span class="muted">Si une seule image s\u2019est téléchargée, autorise les téléchargements multiples dans ton navigateur, ou utilise « Partager ».</span>`
+        : `<b>${files[0].name}</b><br>${W} × ${H} · <b>${fmtBytes(weight)}</b> (originaux : ${fmtBytes(total)})${note}`;
       els.result.hidden = false;
+      updateShareButton();
     } catch (e) {
       console.error(e);
-      els.result.textContent = 'Erreur pendant l’export : ' + e.message;
+      els.result.textContent = 'Erreur pendant l\u2019export : ' + e.message;
       els.result.hidden = false;
     } finally {
       state.exporting = false;
       endProgress('export');
       els.exportFill.style.width = '0';
-      els.exportLabel.textContent = 'Télécharger la mosaïque';
+      updateExportLabel();
       updateButtons();
     }
+  }
+
+  /* Partage natif (mobile) : envoie toutes les images d'un coup vers
+     Instagram, WhatsApp, Drive… Doit partir d'un appui de l'utilisateur. */
+  function shareFiles() {
+    if (!state.lastFiles) return null;
+    return state.lastFiles.map((f) => new File([f.blob], f.name, { type: f.blob.type }));
+  }
+  function updateShareButton() {
+    const files = shareFiles();
+    const ok = !!(files && navigator.canShare && navigator.share && navigator.canShare({ files }));
+    els.shareBtn.hidden = !ok;
+    if (ok) els.shareLabel.textContent = files.length > 1 ? `Partager les ${files.length} slides (Instagram…)` : 'Partager (Instagram…)';
+  }
+  els.shareBtn.addEventListener('click', async () => {
+    const files = shareFiles();
+    if (!files) return;
+    try {
+      await navigator.share({ files });
+    } catch (e) {
+      if (e.name !== 'AbortError') { els.result.hidden = false; els.result.append(` · Partage impossible : ${e.message}`); }
+    }
+  });
+
+  function updateExportLabel() {
+    if (state.exporting) return;
+    const n = state.layout ? state.layout.slides || 1 : 1;
+    els.exportLabel.textContent = n > 1 ? `Télécharger les ${n} slides` : 'Télécharger la mosaïque';
   }
 
   /* -------------------------------------------------------------------- ui */
@@ -715,13 +851,28 @@
       state.s[name] = b.dataset.value;
       saveSettings();
       if (name === 'orientation') scheduleLayout();
-      else updateMeta();
+      else { updateSlidesUI(); updateMeta(); }
     });
   });
 
   els.gap.addEventListener('input', () => { state.s.gap = +els.gap.value; els.gapOut.textContent = els.gap.value + ' px'; scheduleLayout(); });
   els.radius.addEventListener('input', () => { state.s.radius = +els.radius.value; els.radiusOut.textContent = els.radius.value + ' px'; drawPreview(); });
   els.bg.addEventListener('input', () => { state.s.bg = els.bg.value; drawPreview(); });
+  els.slides.addEventListener('change', () => {
+    state.s.slides = +els.slides.value;
+    // Un carrousel Instagram se fait en 4:5 ou en carré : on bascule si besoin.
+    if (state.s.slides > 1 && (state.s.orientation === 'landscape' || state.s.orientation === 'portrait')) {
+      state.s.orientation = 'insta';
+      document.querySelectorAll('[data-name="orientation"] button').forEach((b) => b.classList.toggle('on', b.dataset.value === 'insta'));
+      setStatus('Format 4:5 sélectionné pour le carrousel (le carré marche aussi).');
+    }
+    if (state.s.slides > 1 && state.s.resolution === '4k') {
+      state.s.resolution = '1080';
+      document.querySelectorAll('[data-name="resolution"] button').forEach((b) => b.classList.toggle('on', b.dataset.value === '1080'));
+    }
+    scheduleLayout();
+  });
+  els.pano.addEventListener('change', () => { state.s.pano = els.pano.checked; scheduleLayout(); });
   els.border.addEventListener('change', () => { state.s.border = els.border.checked; scheduleLayout(); });
   els.keepOrder.addEventListener('change', () => { state.s.keepOrder = els.keepOrder.checked; scheduleLayout(); });
   els.quality.addEventListener('input', () => { state.s.quality = +els.quality.value; els.qualityOut.textContent = els.quality.value; saveSettings(); });

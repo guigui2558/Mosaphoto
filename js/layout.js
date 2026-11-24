@@ -403,7 +403,80 @@
     return { cells: best.cells, cropPct: meanCropPct(ars, best.cells), direction: best.direction, score: best.score };
   }
 
-  const api = { computeLayout, scoreCells };
+  /* Répartit les photos entre N slides : même nombre (à 1 près) par slide,
+     avec un mélange portraits/paysages dans chacune. */
+  function distribute(ars, N, keepOrder, seed) {
+    const n = ars.length;
+    const groups = Array.from({ length: N }, () => []);
+    if (keepOrder) {
+      let i = 0;
+      for (let s = 0; s < N; s++) {
+        const size = Math.floor(n / N) + (s < n % N ? 1 : 0);
+        for (let t = 0; t < size; t++) groups[s].push(i++);
+      }
+      return groups;
+    }
+    const rand = mulberry32((seed * 2654435761) >>> 0);
+    const idx = shuffle(ars.map((_, i) => i), rand).sort((a, b) => ars[a] - ars[b]);
+    // distribution "en serpentin" : 0,1,2,2,1,0,0,1,2…
+    idx.forEach((i, t) => {
+      const round = Math.floor(t / N), pos = t % N;
+      groups[round % 2 ? N - 1 - pos : pos].push(i);
+    });
+    return groups;
+  }
+
+  /**
+   * Carrousel : N slides de taille width × height mises côte à côte.
+   *  - pano = true  : une seule grande mosaïque, des photos peuvent être à cheval
+   *                   entre deux slides (effet panorama quand on fait défiler) ;
+   *  - pano = false : une mosaïque par slide, aucune photo n'est coupée.
+   * Les cellules sont données dans le repère global (largeur N × width).
+   */
+  function computeSlides(ars, o) {
+    const N = Math.max(1, Math.min(o.slides || 1, ars.length));
+    if (N === 1) return { ...computeLayout(ars, o), slides: 1 };
+    if (o.pano) return { ...computeLayout(ars, { ...o, width: o.width * N }), slides: N, mode: 'pano' };
+    const budget = o.timeBudget == null ? 200 : o.timeBudget;
+    const groups = distribute(ars, N, o.keepOrder, o.seed || 1);
+    // Recherche de la meilleure répartition : on échange des photos entre deux
+    // slides (ou on en déplace une) tant que la somme des scores s'améliore.
+    // Chaque slide est évaluée vite (sans recherche locale) pendant cette phase.
+    if (!o.keepOrder) {
+      const rand = mulberry32(((o.seed || 1) * 40503) >>> 0);
+      const fast = (g, sI) => computeLayout(g.map((i) => ars[i]), { ...o, timeBudget: 0, seed: (o.seed || 1) + sI * 7919 }).score;
+      const sc = groups.map(fast);
+      const minSize = Math.max(1, Math.floor(ars.length / N) - 1), maxSize = Math.ceil(ars.length / N) + 1;
+      const deadline = now() + budget * 0.6;
+      while (now() < deadline) {
+        const A = Math.floor(rand() * N);
+        let B = Math.floor(rand() * (N - 1)); if (B >= A) B++;
+        const ga = groups[A].slice(), gb = groups[B].slice();
+        const ia = Math.floor(rand() * ga.length);
+        if (rand() < 0.75) {
+          const ib = Math.floor(rand() * gb.length);
+          const t = ga[ia]; ga[ia] = gb[ib]; gb[ib] = t;
+        } else {
+          if (ga.length - 1 < minSize || gb.length + 1 > maxSize) continue;
+          gb.push(ga.splice(ia, 1)[0]);
+        }
+        const sa = fast(ga, A), sb = fast(gb, B);
+        if (sa + sb < sc[A] + sc[B] - 1e-9) { groups[A] = ga; groups[B] = gb; sc[A] = sa; sc[B] = sb; }
+      }
+    }
+    const tb = Math.max(15, (budget * (o.keepOrder ? 1.5 : 0.8)) / N);
+    const cells = [];
+    let score = 0, crop = 0;
+    groups.forEach((g, s) => {
+      const r = computeLayout(g.map((i) => ars[i]), { ...o, timeBudget: tb, seed: (o.seed || 1) + s * 7919 });
+      for (const c of r.cells) cells.push({ index: g[c.index], x: c.x + s * o.width, y: c.y, w: c.w, h: c.h });
+      score += r.score;
+      crop += r.cropPct * g.length;
+    });
+    return { cells, score: score / N, cropPct: crop / ars.length, direction: 'slides', slides: N, mode: 'split' };
+  }
+
+  const api = { computeLayout, computeSlides, scoreCells };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MosaicLayout = api;
 })(typeof self !== 'undefined' ? self : this);

@@ -55,6 +55,22 @@
           <button data-value="4k" class="on">4K<small id="res4k">3840 × 2160</small></button>
           <button data-value="1080" >1080p<small id="res1080">1920 × 1080</small></button>
         </div>
+        <div class="row">
+          <label for="slides">Carrousel Instagram</label>
+          <select id="slides">
+            <option value="1">Non</option>
+            <option value="2">2 slides</option><option value="3">3 slides</option>
+            <option value="4">4 slides</option><option value="5">5 slides</option>
+            <option value="6">6 slides</option><option value="7">7 slides</option>
+            <option value="8">8 slides</option><option value="9">9 slides</option>
+            <option value="10">10 slides</option><option value="15">15 slides</option>
+            <option value="20">20 slides</option>
+          </select>
+        </div>
+        <div class="sub" id="slidesOpts" hidden>
+          <label class="check"><input type="checkbox" id="pano"> Effet panorama</label>
+          <p class="hint" id="slidesHint"></p>
+        </div>
       </section>
 
       <section class="block">
@@ -99,6 +115,10 @@
           <i class="btn-fill" id="exportFill"></i>
         </button>
         <p class="result" id="result" hidden></p>
+        <button class="btn ghost" id="shareBtn" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0L8 7m4-4 4 4M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg>
+          <span id="shareLabel">Partager (Instagram…)</span>
+        </button>
       </section>
     </aside>
 

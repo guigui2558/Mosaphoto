@@ -11,6 +11,10 @@ Aucune installation, aucun serveur : ouvrez `index.html` dans un navigateur
 - **Jusqu'à 100 photos** (glisser-déposer ou sélection), doublons ignorés, retrait individuel.
 - **3 formats** : Paysage (16:9), Portrait (9:16) Carré (1:1, 1080 × 1080) et 4:5 (1080 × 1350), les deux formats de publication Instagram.
 - **2 qualités** : 4K (3840 × 2160) et 1080p (1920 × 1080). La composition est identique entre les deux.
+- **Carrousel Instagram** (2 à 20 slides) : la mosaïque est découpée en plusieurs images
+  4:5 ou carrées, téléchargées ensemble ou partagées d'un coup (Instagram…) sur mobile.
+  Deux modes : une mosaïque par slide (aucune photo coupée, photos réparties intelligemment
+  entre les slides) ou effet panorama (photos à cheval entre les slides quand on fait défiler).
 - **Composition intelligente** (`js/layout.js`) :
   - mise en page « justifiée » : un portrait prend une tuile haute et étroite, un paysage une tuile large ;
   - répartition optimale des photos en rangées (programmation dynamique) ;
